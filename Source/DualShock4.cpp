@@ -130,8 +130,10 @@ struct DS4_USB_PACKET {
 #define DS4_BUTTON_DPAD_NORTH		0x0
 
 
-char gamepadCount = -1;
+DWORD gamepadCount = 0;
+bool DS4Found = false;
 hid_device *gamepadHandle[NEX_INPUT_MAX_COUNT];
+//unsigned short gamepadType[NEX_INPUT_MAX_COUNT]; // USB, BT
 
 BOOL APIENTRY DllMain(HMODULE hModule, DWORD  ul_reason_for_call, LPVOID lpReserved)
 {
@@ -140,28 +142,32 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD  ul_reason_for_call, LPVOID lpReser
 		case DLL_PROCESS_ATTACH:
 		{
 			//Search all DualShock 4
-			struct hid_device_info *devs, *cur_dev;
-			//devs = hid_enumerate(0x0, 0x0);
-			devs = hid_enumerate(DS4_VENDOR, 0x0);
-			cur_dev = devs;
+			struct hid_device_info *cur_dev;
+			//cur_dev = hid_enumerate(0x0, 0x0);
+			cur_dev = hid_enumerate(DS4_VENDOR, 0x0);
 
 			while (cur_dev) {
-				if (cur_dev->vendor_id == DS4_VENDOR)
-					if (cur_dev->product_id == DS4_USB || cur_dev->product_id == DS4_V2_USB) //BT soon
+					if (cur_dev->product_id == DS4_USB || cur_dev->product_id == DS4_V2_USB) // || cur_dev->product_id == DS4_BT) // BT soon
 					{
-						gamepadCount++;
 						gamepadHandle[gamepadCount] = hid_open(cur_dev->vendor_id, cur_dev->product_id, cur_dev->serial_number);
 						hid_set_nonblocking(gamepadHandle[gamepadCount], 1);
+						
+						DS4Found = true;
+						gamepadCount++;
 
-						if (gamepadCount == NEX_INPUT_MAX_COUNT - 1)
+						if (gamepadCount == NEX_INPUT_MAX_COUNT)
 							break;
 					}
 				cur_dev = cur_dev->next;
 			}
+			if (DS4Found)
+				gamepadCount--; // Back normal count
+
 			//gamepadCount = 0;
 			//gamepadHandle[gamepadCount] = hid_open(DS4_VENDOR, DS4_USB, NULL);
 
-			hid_free_enumeration(devs);
+			if (cur_dev)
+				hid_free_enumeration(cur_dev);
 
 			break;
 		}
@@ -190,7 +196,7 @@ DLLEXPORT DWORD __stdcall NEXInputGetState(__in DWORD dwUserIndex, __out NEX_INP
 	pState->Pitch = 0;
 	pState->Roll = 0;
 
-	if (gamepadCount >= dwUserIndex) {
+	if (DS4Found && gamepadCount >= dwUserIndex && gamepadHandle[dwUserIndex]) {
 		DS4_USB_PACKET DS4State;
 		if (hid_read(gamepadHandle[dwUserIndex], (u8 *)&DS4State, 64) == 64)
 		{
@@ -238,7 +244,7 @@ DLLEXPORT DWORD __stdcall NEXInputGetState(__in DWORD dwUserIndex, __out NEX_INP
 
 DLLEXPORT DWORD __stdcall NEXInputSetState(__in DWORD dwUserIndex, __in NEX_OUTPUT_STATE *pOutputState)
 {
-	if (gamepadCount >= dwUserIndex) {
+	if (DS4Found && gamepadCount >= dwUserIndex && gamepadHandle[dwUserIndex]) {
 		unsigned char rumblePacket[31];
 		memset(rumblePacket, 0, 31);
 		rumblePacket[0] = 0x05;
@@ -268,7 +274,7 @@ DLLEXPORT DWORD __stdcall NEXInputGetInfo(__in DWORD dwUserIndex, __out NEX_CONT
 	pControllerInfo->BatteryLevel = NEX_BATTERY_NONE; //1 .. 5 or NEX_BATTERY_NONE
 	pControllerInfo->SupportRotation = true; 
 
-	if (gamepadCount >= dwUserIndex)
+	if (DS4Found && gamepadCount >= dwUserIndex && gamepadHandle[dwUserIndex])
 		return ERROR_SUCCESS;
 	else
 		return ERROR_DEVICE_NOT_CONNECTED;
@@ -277,7 +283,7 @@ DLLEXPORT DWORD __stdcall NEXInputGetInfo(__in DWORD dwUserIndex, __out NEX_CONT
 DLLEXPORT DWORD __stdcall NEXInputPowerOff(__in DWORD dwUserIndex)
 {
 	//Turn off controller
-	if (gamepadCount >= dwUserIndex)
+	if (DS4Found && gamepadCount >= dwUserIndex && gamepadHandle[dwUserIndex])
 		return ERROR_SUCCESS;
 	else
 		return ERROR_DEVICE_NOT_CONNECTED;
